@@ -6,4 +6,5 @@ Small text editor for linux system.
 
 # Usage
    Ctrl + C - exiting 
+   
    Ctrl + S - saving
