@@ -3,37 +3,34 @@
 #include <fstream>
 #include <sstream>
 #include <cstring>
+#include <cstdlib>
 #include <unistd.h>
+#include <termios.h>
 
-/* --windows-- */
-#include <windows.h>
-#include <conio.h>
+//  g++ main.cpp -o edi
 
-DWORD originalConsoleMode;
-HANDLE hStdin;
+/* -- Linux Terminal Config -- */
+struct termios orig_termios;
 
 void disableRawMode() {
-    SetConsoleMode(hStdin, originalConsoleMode);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
 void enableRawMode() {
-    hStdin = GetStdHandle(STD_INPUT_HANDLE);
-    GetConsoleMode(hStdin, &originalConsoleMode);
+    tcgetattr(STDIN_FILENO, &orig_termios);
     atexit(disableRawMode);
 
-    DWORD rawMode = originalConsoleMode;
-    rawMode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT);
-    SetConsoleMode(hStdin, rawMode);
-}
+    struct termios raw = orig_termios;
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
+    raw.c_iflag &= ~(IXON | ICRNL);
+    raw.c_oflag &= ~(OPOST);
+    
+    raw.c_cc[VMIN] = 1;
+    raw.c_cc[VTIME] = 0;
 
-void enableAnsiSupport() {
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD dwMode = 0;
-    GetConsoleMode(hOut, &dwMode);
-    dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-    SetConsoleMode(hOut, dwMode);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
-/* --windows-- */
+/* -------------------------- */
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
@@ -44,7 +41,7 @@ enum EditorKey {
   ARROW_DOWN
 };
 
-struct Line{
+struct Line {
     char contents[80];
 
     Line(){
@@ -56,7 +53,7 @@ struct Line{
     }
 };
 
-struct Editor{
+struct Editor {
     int cursor_x;
     int cursor_y;
     std::vector<Line> lines;
@@ -87,7 +84,7 @@ void open_file(Editor &editor){
         std::vector<Line> lines;
         int col=0;
         Line temp_line;
-        for(int i=0; i<buffer.length(); i++){
+        for(size_t i=0; i<buffer.length(); i++){
             char c = buffer.at(i);
 
             if (col >= 79 && c != '\n') {
@@ -116,7 +113,7 @@ void open_file(Editor &editor){
 
 void save_buffer(const Editor &editor){
     std::ofstream file(editor.file_name);
-    for(int row = 0; row < editor.lines.size(); row++){
+    for(size_t row = 0; row < editor.lines.size(); row++){
         for(int col = 0; col < 80; col++){
             char c = editor.lines[row].contents[col];
             if(c == '\0') break; 
@@ -131,7 +128,7 @@ void print_buffer(const Editor &editor){
     std::cout << "\x1b[?25l";
     std::cout << "\x1b[H";
 
-    for(int line = 0; line < editor.lines.size(); line++){
+    for(size_t line = 0; line < editor.lines.size(); line++){
         std::cout << "\x1b[K";
         std::cout << line+1 << ":   "; 
         
@@ -145,29 +142,40 @@ void print_buffer(const Editor &editor){
     int line_number_offset = 5; 
 
     std::cout << "\x1b[" << (editor.cursor_y + 1) << ";" << (editor.cursor_x + 1 + line_number_offset) << "H";
-
     std::cout << "\x1b[?25h";
     std::cout.flush();
 }
 
 int editor_read_key(){
-    int c = _getch();
+    int nread;
+    char c;
+    while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
+        if (nread == -1) return '\0';
+    }
 
-    if (c == 0 || c == 224) {
-        switch (_getch()) {
-            case 72: return ARROW_UP;
-            case 80: return ARROW_DOWN;
-            case 75: return ARROW_LEFT;
-            case 77: return ARROW_RIGHT;
+    // \x1b to poczatek escape seq
+    if (c == '\x1b') {
+        char seq[3];
+        if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+        if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+
+        if (seq[0] == '[') {
+            switch (seq[1]) {
+                case 'A': return ARROW_UP;
+                case 'B': return ARROW_DOWN;
+                case 'C': return ARROW_RIGHT;
+                case 'D': return ARROW_LEFT;
+            }
         }
+        return '\x1b';
     }
     
     return c;
 }
 
 void editor_move_cursor(Editor &editor, int key) {
-    int row_len = 0;
-    if (editor.cursor_y < editor.lines.size()) {
+    size_t row_len = 0;
+    if (editor.cursor_y < (int)editor.lines.size()) {
         row_len = strlen(editor.lines[editor.cursor_y].contents);
         if (row_len > 0 && editor.lines[editor.cursor_y].contents[row_len-1] == '\n') 
             row_len--;
@@ -180,7 +188,7 @@ void editor_move_cursor(Editor &editor, int key) {
             }
             break;
         case ARROW_RIGHT:
-             if (editor.cursor_x < 80 && editor.cursor_x < row_len) {
+             if (editor.cursor_x < 80 && editor.cursor_x < (int)row_len) {
                 editor.cursor_x++;
             }
             break;
@@ -190,20 +198,20 @@ void editor_move_cursor(Editor &editor, int key) {
             }
             break;
         case ARROW_DOWN:
-            if (editor.cursor_y < editor.lines.size() - 1) {
+            if (editor.cursor_y < (int)editor.lines.size() - 1) {
                 editor.cursor_y++;
             }
             break;
     }
     
-    int new_row_len = 0;
-    if (editor.cursor_y < editor.lines.size()) {
+    size_t new_row_len = 0;
+    if (editor.cursor_y < (int)editor.lines.size()) {
         new_row_len = strlen(editor.lines[editor.cursor_y].contents);
         if(new_row_len > 0 && editor.lines[editor.cursor_y].contents[new_row_len-1] == '\n') 
             new_row_len--;
     }
-    if (editor.cursor_x > new_row_len) {
-        editor.cursor_x = new_row_len;
+    if (editor.cursor_x > (int)new_row_len) {
+        editor.cursor_x = (int)new_row_len;
     }
 }
 
@@ -211,7 +219,7 @@ void editor_process_key_pressed(Editor &editor) {
   int c = editor_read_key();
 
   switch (c) {
-    case CTRL_KEY('c'): 
+    case CTRL_KEY('c'):
             std::cout << "\x1b[2J\x1b[H";
             exit(0);
             break;
@@ -229,14 +237,13 @@ void editor_process_key_pressed(Editor &editor) {
 
 int main(int argc, char* argv[]){
     if(argc != 2){
-        std::cout<<"Please provide file\n";
+        std::cout << "Please provide file\n";
         return EXIT_FAILURE;
     }
 
     Editor editor(argv[1]);
     open_file(editor);
 
-    enableAnsiSupport();
     enableRawMode();
     
     std::cout << "\x1b[2J";
@@ -245,4 +252,6 @@ int main(int argc, char* argv[]){
         print_buffer(editor);
         editor_process_key_pressed(editor);
     }
+    
+    return 0;
 }
