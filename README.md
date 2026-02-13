@@ -1,10 +1,12 @@
 # Edi
 Small text editor for linux system. 
 
-# Compilation
-   g++ main.cpp -o edi
+# Compilation (requires sudo)
+  
+	sudo make install
 
 # Usage
-   Ctrl + C - exiting 
+
+	Ctrl + C - exiting 
    
-   Ctrl + S - saving
+	Ctrl + S - saving
