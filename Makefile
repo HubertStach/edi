@@ -9,7 +9,7 @@ INSTALL_DIR = /usr/local/bin
 all: $(TARGET)
 
 $(TARGET): $(SRC)
-	$(CXX) $CXXFLAGS) -o $(TARGET) $(SRC)
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRC)
 
 install: $(TARGET)
 	@echo "Installing $(TARGET) text editor..."

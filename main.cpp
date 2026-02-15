@@ -65,7 +65,7 @@ struct Editor {
     int cursor_x;
     int cursor_y;
     int row_offset; // Scroll pionowy
-    int col_offset; // Scroll poziomy (nowość!)
+    int col_offset; // Scroll poziomy
     int screen_rows;
     int screen_cols;
     std::vector<Line> lines;
@@ -92,9 +92,7 @@ void open_file(Editor &editor){
 
     if(file.is_open()) {
         std::string line_str;
-        // std::getline automatycznie obsługuje wczytywanie linii o dowolnej długości
         while(std::getline(file, line_str)) {
-            // Usuń ewentualny znak \r na końcu (dla plików z Windowsa)
             if (!line_str.empty() && line_str.back() == '\r') {
                 line_str.pop_back();
             }
@@ -103,7 +101,6 @@ void open_file(Editor &editor){
         file.close();
     }
 
-    // Jeśli plik był pusty, dodaj jedną pustą linię
     if (editor.lines.empty()) {
         editor.lines.push_back(Line(""));
     }
@@ -119,9 +116,8 @@ void save_buffer(const Editor &editor){
     }
 }
 
-// Logika scrollowania (pionowo i poziomo)
 void editor_scroll(Editor &editor) {
-    // --- PIONOWO ---
+    // Scroll pionowy
     if (editor.cursor_y < editor.row_offset) {
         editor.row_offset = editor.cursor_y;
     }
@@ -129,14 +125,21 @@ void editor_scroll(Editor &editor) {
         editor.row_offset = editor.cursor_y - editor.screen_rows + 1;
     }
 
-    // --- POZIOMO ---
-    // Offset na numery linii (zmienna wartość w print_buffer, tutaj przyjmijmy stałą korektę logiczną)
-    // W tym prostym modelu scrollujemy treść.
+    // Scroll poziomy
+    // Tutaj musimy uwzględnić dynamiczną szerokość marginesu, ale dla uproszczenia
+    // logiki scrolla, operujemy na surowych danych. Margines jest dodawany przy rysowaniu.
     if (editor.cursor_x < editor.col_offset) {
         editor.col_offset = editor.cursor_x;
     }
-    // Odejmujemy margines na numery linii (np. 6 znaków) od szerokości ekranu
-    int available_cols = editor.screen_cols - 6; 
+    
+    // Obliczamy ile miejsca na tekst zostaje po odjęciu marginesu
+    // Margines = liczba cyfr max linii + 2 znaki (": ")
+    int max_lines = editor.lines.size();
+    int digit_count = std::to_string(max_lines).length();
+    int gutter_width = digit_count + 2; 
+
+    int available_cols = editor.screen_cols - gutter_width; 
+    
     if (editor.cursor_x >= editor.col_offset + available_cols) {
         editor.col_offset = editor.cursor_x - available_cols + 1;
     }
@@ -145,32 +148,35 @@ void editor_scroll(Editor &editor) {
 void print_buffer(Editor &editor){
     editor_scroll(editor);
 
-    std::cout << "\x1b[?25l"; // Ukryj kursor
-    std::cout << "\x1b[H";    // Home
+    std::cout << "\x1b[?25l";
+    std::cout << "\x1b[H";
+
+    int max_lines = editor.lines.size();
+    if(max_lines == 0) max_lines = 1; 
+    int digit_count = std::to_string(max_lines).length();
+    
+    int gutter_width = digit_count + 2;
 
     for(int y = 0; y < editor.screen_rows; y++){
         int file_row = y + editor.row_offset;
         
-        std::cout << "\x1b[K"; // Wyczyść linię
+        std::cout << "\x1b[K";
 
         if (file_row < (int)editor.lines.size()) {
-            // Wyświetl numer linii
-            std::cout << std::setw(4) << (file_row + 1) << "  ";
+            std::cout << std::setw(digit_count) << (file_row + 1) << ": ";
             
-            // Pobierz linię
             std::string &row = editor.lines[file_row].contents;
             
-            // Oblicz, co wyświetlić (obsługa poziomego scrolla)
             int len = row.length();
             if (len > editor.col_offset) {
-                // Wyświetl fragment od col_offset
-                // Ogranicz długość do szerokości ekranu, żeby nie zawijało
-                int available_width = editor.screen_cols - 6; // 6 to szerokość numeracji
-                std::string substr = row.substr(editor.col_offset, available_width);
-                std::cout << substr;
+                int available_width = editor.screen_cols - gutter_width;
+                if (available_width > 0) {
+                    std::string substr = row.substr(editor.col_offset, available_width);
+                    std::cout << substr;
+                }
             }
         } else {
-            std::cout << "~"; // Styl Vima dla pustych linii
+            std::cout << "~";
         }
 
         if (y < editor.screen_rows - 1) {
@@ -178,13 +184,12 @@ void print_buffer(Editor &editor){
         }
     }
 
-    // Ustawienie kursora
-    int line_number_offset = 6; 
     int screen_y = (editor.cursor_y - editor.row_offset) + 1;
-    int screen_x = (editor.cursor_x - editor.col_offset) + 1 + line_number_offset;
+    
+    int screen_x = 1 + gutter_width + (editor.cursor_x - editor.col_offset);
 
     std::cout << "\x1b[" << screen_y << ";" << screen_x << "H";
-    std::cout << "\x1b[?25h"; // Pokaż kursor
+    std::cout << "\x1b[?25h";
     std::cout.flush();
 }
 
@@ -213,7 +218,7 @@ int editor_read_key(){
     return c;
 }
 
-// --- FUNKCJE EDYCJI (zaktualizowane dla std::string) ---
+// --- Text edit funcs ---
 
 void editor_insert_newline(Editor &editor) {
     if (editor.lines.empty()) {
@@ -222,14 +227,12 @@ void editor_insert_newline(Editor &editor) {
     
     std::string &current_row = editor.lines[editor.cursor_y].contents;
     
-    // Podziel string na dwie części
     std::string next_row_content = "";
     if (editor.cursor_x < (int)current_row.length()) {
         next_row_content = current_row.substr(editor.cursor_x);
-        current_row.erase(editor.cursor_x); // Usuń końcówkę z obecnej linii
+        current_row.erase(editor.cursor_x); 
     }
 
-    // Wstaw nową linię do wektora
     editor.lines.insert(editor.lines.begin() + editor.cursor_y + 1, Line(next_row_content));
     
     editor.cursor_y++;
@@ -248,11 +251,9 @@ void editor_insert_char(Editor &editor, int c) {
 
     std::string &row = editor.lines[editor.cursor_y].contents;
 
-    // Zabezpieczenie (choć string sam by rzucił wyjątek przy skrajnie błędnym indeksie)
     if (editor.cursor_x < 0) editor.cursor_x = 0;
     if (editor.cursor_x > (int)row.length()) editor.cursor_x = row.length();
 
-    // Wstaw znak w odpowiednim miejscu
     row.insert(editor.cursor_x, 1, (char)c);
     editor.cursor_x++;
 }
@@ -262,25 +263,15 @@ void editor_del_char(Editor &editor) {
     
     std::string &row = editor.lines[editor.cursor_y].contents;
 
-    // 1. Kursor wewnątrz linii -> usuń znak przed kursorem
     if (editor.cursor_x > 0) {
         row.erase(editor.cursor_x - 1, 1);
         editor.cursor_x--;
     }
-    // 2. Kursor na początku -> sklej z poprzednią linią
     else if (editor.cursor_y > 0) {
         std::string &prev_row = editor.lines[editor.cursor_y - 1].contents;
-        
-        // Zapisz pozycję kursora (koniec poprzedniej linii)
         int new_cursor_x = prev_row.length();
-        
-        // Doklej obecną linię do poprzedniej
         prev_row += row;
-        
-        // Usuń obecną linię
         editor.lines.erase(editor.lines.begin() + editor.cursor_y);
-        
-        // Przesuń kursor
         editor.cursor_y--;
         editor.cursor_x = new_cursor_x;
     }
@@ -289,7 +280,6 @@ void editor_del_char(Editor &editor) {
 // --- RUCH KURSORA ---
 
 void editor_move_cursor(Editor &editor, int key) {
-    // Pobierz długość aktualnej linii (lub 0 jeśli brak linii)
     int row_len = 0;
     if (editor.cursor_y < (int)editor.lines.size()) {
         row_len = editor.lines[editor.cursor_y].contents.length();
@@ -300,7 +290,6 @@ void editor_move_cursor(Editor &editor, int key) {
             if (editor.cursor_x != 0) {
                 editor.cursor_x--;
             } else if (editor.cursor_y > 0) {
-                // Opcjonalnie: przejście na koniec poprzedniej linii przy strzałce w lewo
                 editor.cursor_y--;
                 editor.cursor_x = editor.lines[editor.cursor_y].contents.length();
             }
@@ -309,7 +298,6 @@ void editor_move_cursor(Editor &editor, int key) {
             if (editor.cursor_x < row_len) {
                 editor.cursor_x++;
             } else if (editor.cursor_x == row_len && editor.cursor_y < (int)editor.lines.size() - 1) {
-                // Opcjonalnie: przejście na początek następnej linii
                 editor.cursor_y++;
                 editor.cursor_x = 0;
             }
@@ -326,7 +314,6 @@ void editor_move_cursor(Editor &editor, int key) {
             break;
     }
     
-    // Korekta X po zmianie linii (np. skok z długiej na krótką)
     int new_row_len = 0;
     if (editor.cursor_y < (int)editor.lines.size()) {
         new_row_len = editor.lines[editor.cursor_y].contents.length();
@@ -351,8 +338,8 @@ void editor_process_key_pressed(Editor &editor) {
     case '\n':
         editor_insert_newline(editor);
         break;
-    case BACKSPACE: // 127
-    case 8:         // Czasami backspace to 8 (Ctrl-H)
+    case BACKSPACE: 
+    case 8:         
         editor_del_char(editor);
         break;
     case ARROW_UP:
@@ -380,7 +367,7 @@ int main(int argc, char* argv[]){
 
     enableRawMode();
     
-    std::cout << "\x1b[2J"; // Clear screen
+    std::cout << "\x1b[2J";
 
     while(true) {
         print_buffer(editor);
