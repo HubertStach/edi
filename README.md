@@ -5,6 +5,10 @@ Small text editor for linux system.
   
 	sudo make install
 
+Or if you want to just compile:
+
+    make comp
+
 # Usage
 
 	Ctrl + C - exiting 

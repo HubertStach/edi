@@ -8,6 +8,9 @@ INSTALL_DIR = /usr/local/bin
 
 all: $(TARGET)
 
+comp:
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRC)
+
 $(TARGET): $(SRC)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRC)
 
@@ -19,7 +22,7 @@ install: $(TARGET)
 
 unistall:
 	@echo "Uninstalling $(TARGET)"
-	rm -f $(INSTALL_DIRECTORY/$(TARGET)
+	rm -f $(INSTALL_DIRECTORY)/$(TARGET)
 	@echo "Done, goodbye!"
 
 clean:

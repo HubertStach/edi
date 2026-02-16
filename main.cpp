@@ -35,6 +35,60 @@ void enableRawMode() {
 }
 /* ----------------------------- */
 
+// --- Lexer ---
+
+struct Lexer {
+    std::vector<int> tokens_ids_left;
+    std::vector<int> tokens_ids_right;
+
+    void print() const {
+        std::cout << "left:  ";
+        for (size_t i = 0; i < tokens_ids_left.size(); ++i) {
+            std::cout << tokens_ids_left[i];
+            if (i + 1 < tokens_ids_left.size()) std::cout << ", ";
+        }
+        std::cout << "\nright: ";
+        for (size_t i = 0; i < tokens_ids_right.size(); ++i) {
+            std::cout << tokens_ids_right[i];
+            if (i + 1 < tokens_ids_right.size()) std::cout << ", ";
+        }
+        std::cout << "\n";
+    }
+};
+
+void tokenize(const std::string& line, Lexer* lexer) {
+    lexer->tokens_ids_left.clear();
+    lexer->tokens_ids_right.clear();
+
+    std::string buffer;
+    size_t start = 0;
+
+    for (size_t i = 0; i < line.length(); ++i) {
+        char c = line[i];
+
+        if (!std::isspace(static_cast<unsigned char>(c))) {
+            if (buffer.empty()) {
+                start = i;
+            }
+            buffer += c;
+        }
+        else {
+            if (!buffer.empty()) {
+                lexer->tokens_ids_left.push_back(static_cast<int>(start));
+                lexer->tokens_ids_right.push_back(static_cast<int>(i));
+                buffer.clear();
+            }
+        }
+    }
+
+    if (!buffer.empty()) {
+        lexer->tokens_ids_left.push_back(static_cast<int>(start));
+        lexer->tokens_ids_right.push_back(static_cast<int>(line.length()));
+    }
+}
+
+// -----------------//
+
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 int get_window_size(int *rows, int *cols) {
@@ -70,6 +124,7 @@ struct Editor {
     int screen_cols;
     std::vector<Line> lines;
     std::string file_name;
+    Lexer lexer;
     
     Editor(const std::string &file_name){
         this->file_name = file_name;
@@ -126,8 +181,6 @@ void editor_scroll(Editor &editor) {
     }
 
     // Scroll poziomy
-    // Tutaj musimy uwzględnić dynamiczną szerokość marginesu, ale dla uproszczenia
-    // logiki scrolla, operujemy na surowych danych. Margines jest dodawany przy rysowaniu.
     if (editor.cursor_x < editor.col_offset) {
         editor.col_offset = editor.cursor_x;
     }
@@ -277,6 +330,7 @@ void editor_del_char(Editor &editor) {
     }
 }
 
+
 // --- RUCH KURSORA ---
 
 void editor_move_cursor(Editor &editor, int key) {
@@ -324,36 +378,44 @@ void editor_move_cursor(Editor &editor, int key) {
 }
 
 void editor_process_key_pressed(Editor &editor) {
-  int c = editor_read_key();
+    int c = editor_read_key();
 
-  switch (c) {
-    case CTRL_KEY('c'): 
+    bool tokenize_line = false;
+
+    switch (c) {
+        case CTRL_KEY('c'): 
             std::cout << "\x1b[2J\x1b[H";
             exit(0);
             break;
-    case CTRL_KEY('s'):
-        save_buffer(editor);
-        break;
-    case '\r':
-    case '\n':
-        editor_insert_newline(editor);
-        break;
-    case BACKSPACE: 
-    case 8:         
-        editor_del_char(editor);
-        break;
-    case ARROW_UP:
-    case ARROW_DOWN:
-    case ARROW_LEFT:
-    case ARROW_RIGHT:
-        editor_move_cursor(editor, c);
-        break;
-    case '\x1b':
-        break;
-    default:
-        editor_insert_char(editor, c);
-        break;
-  }
+        case CTRL_KEY('s'):
+            save_buffer(editor);
+            break;
+        case '\r':
+        case '\n':
+            editor_insert_newline(editor);
+            tokenize_line = true;
+            break;
+        case BACKSPACE: 
+        case 8:         
+            editor_del_char(editor);
+            tokenize_line = true;
+            break;
+        case ARROW_UP:
+        case ARROW_DOWN:
+        case ARROW_LEFT:
+        case ARROW_RIGHT:
+            editor_move_cursor(editor, c);
+            break;
+        case '\x1b':
+            break;
+        default:
+            editor_insert_char(editor, c);
+            tokenize_line = true;
+            break;
+    }
+    if(tokenize_line){
+        tokenize(editor.lines[editor.cursor_y].contents, &editor.lexer);
+    }
 }
 
 int main(int argc, char* argv[]){
